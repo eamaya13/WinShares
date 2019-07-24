@@ -55,6 +55,7 @@ class WinShares:
                 temp['OldWinShares'] = (np.unique(temp.WinVal)[0] / abs(np.unique(temp.TeamGameWPA))) * temp[['TotWPA']]
                 temp['NewWinShares'] = np.unique(temp.WinVal)[0] / temp[['WOff', 'WDef', 'WST']].sum(axis = 1).sum(axis = 0) * temp[['WOff', 'WDef', 'WST']].sum(axis = 1)
                 temp.NewWinShares.fillna(0, inplace = True)
+                temp['No0WinShares'] = temp['OldWinShares'].apply(lambda x: x if x > 0 else 0)
                 new = pd.concat([new, temp], axis = 0, sort = False)
             final = pd.concat([final, new], axis = 0, sort = False)
             
@@ -85,6 +86,10 @@ class WinShares:
             if not snap_counts.set_index('Player').index.is_unique:
                 snap_counts['TotPct'] = snap_counts[['OffPct', 'DefPct', 'STPct']].sum(axis = 1)
                 snap_counts = snap_counts.sort_values(by = 'TotPct', ascending = False).drop_duplicates(subset = 'Player', keep = 'first').set_index('Player').drop('TotPct', axis = 1).reset_index()
+             
+            if not roster.set_index('Player').index.is_unique:
+                roster = roster.sort_values(by = 'AV', ascending = False).drop_duplicates(subset = 'Player', keep = 'first')
+             
             new = pd.concat([snap_counts.set_index('Player'), roster.rename(columns = {'Pos': 'RosterPos'}).set_index('Player')], axis = 1, sort = False)
             new = self.calculate_relative_importance(new.reset_index().rename(columns = {'index': 'Player'}))            
             df = pd.concat([df, new], sort = False, axis = 0)
@@ -164,6 +169,7 @@ class WinShares:
         
         
     def _scrape_roster(self, year, team):
+        """scrapes pfr roster data"""
         year = str(year)
         team = str(team)
         url = f'https://www.pro-football-reference.com/teams/{team}/{year}_roster.htm'
@@ -180,6 +186,7 @@ class WinShares:
         
         
     def _scrape_boxscore(self, year, team, gameid):
+        """scrapes pfr boxscore and returns snap_counts for given year, team, and gameid"""
         year, team, gameid = str(year), str(team), str(gameid)
         url = f'https://www.pro-football-reference.com/{gameid}'
         ua = UserAgent()
@@ -187,47 +194,51 @@ class WinShares:
         response = requests.get(url, headers=headers)
         comm = re.compile("<!--|-->")
         soup = BeautifulSoup(comm.sub("", response.text), 'lxml')
-        # determine_home_away
-        road, home = [i.get_text() for i in soup.find('table', id = 'scoring').find('thead').findAll('th') if i['data-stat'] in {'vis_team_score', 'home_team_score'}]
+        # determine home and away team
         pfrroad, pfrhome = [i['href'] for i in soup.find('table', class_ = 'linescore nohover stats_table no_freeze').find('tbody').findAll('a') if 'teams' in i['href']]
         if team in pfrroad:
             id = 'vis_snap_counts'
-            # expected_points = expected_points.iloc[:1]
         elif team in pfrhome:
             id = 'home_snap_counts'
-            # expected_points = expected_points.iloc[1:]
         
         table = soup.find('table', id = id)
         col_names = ['Player', 'Pos', 'OffNum', 'OffPct', 'DefNum', 'DefPct', 'STNum', 'STPct']
         row_data = [[self._floatify(i.get_text()) for i in row.findAll(['th','td'])] for row in table.find('tbody').findAll('tr') if not row.has_attr('class')]
         snap_counts = pd.DataFrame(row_data, columns = col_names)
+        
+        #attach week of game to snap_counts df
         week = soup.find('div', id = 'div_other_scores').find('h2').find('a').get_text()
         snap_counts['Week'] = [int(week[(week.index(' ') + 1):])]*(len(snap_counts))
+        
         return snap_counts
-        # return expected_points, snap_counts
         
     def _scrape_game_wpa(self, year, team):  
+        """scrape wpa from nflscrapR for given year and team"""
         year, team = str(year), str(team)
+        #load data only if unloaded
         if type(self.pbp) != pd.core.frame.DataFrame and type(self.games) != pd.core.frame.DataFrame:
             self._load_win_probability(year)
         pd.options.mode.chained_assignment = None
+        
         team, df = str(team), self.pbp
         team = [i for i in self.teams[team] if i in np.unique(df[['home_team', 'away_team']])][0]
         df = df[(df.home_team == team) | (df.away_team == team)]
         
+        #creates dataframe with week as index and playclass (Off_run, Def_pass, etc.) as columns. Values are cumulative WPA for week and playclass
         df[f'{team}_wpa'] = [i if j == team else -i for i, j in df[['wpa', 'posteam']].values]
         df = pd.concat([df.set_index('game_id'), self.games[(self.games.home_team == team) | (self.games.away_team == team)].set_index('game_id')[['week']]], axis = 1, sort = False).reset_index()
-        #TODO find out which ep to use and create a smasher that creates a similar table as previously or one that is the whole year w weeks and redo the calculation for ep below
         df['playclass'] = [f'Off_{j}' if i == team else f'Def_{j}' for i, j in df[['posteam', 'play_type']].values]
         df = df.groupby(['week', 'playclass']).sum().reset_index().pivot_table(values = f'{team}_wpa', columns = 'playclass', index = 'week')
         return df
 
     def _load_win_probability(self, year):
+        """loads play-by-play data and game data from nflscrapR"""
         year = str(year)
         self.pbp = pd.read_csv(f'https://raw.githubusercontent.com/ryurko/nflscrapR-data/master/play_by_play_data/regular_season/reg_pbp_{year}.csv', low_memory = False)
         self.games = pd.read_csv(f'https://raw.githubusercontent.com/ryurko/nflscrapR-data/master/games_data/regular_season/reg_games_{year}.csv', low_memory = False)
   
     def _floatify(self, obj):
+        """turns objects into floats and handles percents and empty cells"""
         if type(obj) == float:
             return obj
         if obj == '':
@@ -244,12 +255,12 @@ class WinShares:
         except:
             return obj  
 
-import time
-start = time.time()
-W = WinShares()
-df = W.win_shares('2018')
-end = time.time()
-print(end - start)
+# import time
+# start = time.time()
+# W = WinShares()
+# df = W.win_shares('2017')
+# end = time.time()
+# print(end - start)
 # # snap_counts = S._scrape_boxscore(year, team, boxscore)
 
 # # sched = S._scrape_schedule(year, team)
