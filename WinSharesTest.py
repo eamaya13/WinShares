@@ -99,8 +99,12 @@ class WinShares:
         return df   
 
     def calculate_relative_importance(self, df):
-        #TODO calculate relative importance and also WPA per player, maybe find a way to do it while building the dataset that is also modular and ready for adjustment
-        #also dont forget to experiment with rushing and passing splits
+        """
+        Calculates relative importance of a player to his team
+        
+        df: data frame of roster with snap counts for each player
+        """
+        #TODO experiment w rushing/passing splits and find a way to account for K, P, LS positions
         for k in ['Off', 'Def', 'ST']:
             temp = df[(df[f'{k}Pct'] != 0.0) & (~np.isnan(df[f'{k}Pct']))]
             bottom = sum([(i * j) / sum(temp['AV']) for i, j in temp[['AV', f'{k}Pct']].values])
@@ -128,6 +132,7 @@ class WinShares:
         return df
         
     def _scrape_standings(self, year):
+        """scrapes year standings from pfr"""
         year = str(year)
         url = f'https://www.pro-football-reference.com/years/{year}/'
         ua = UserAgent()
@@ -144,6 +149,7 @@ class WinShares:
         return df
 
     def _scrape_schedule(self, year, team):
+        """scrapes schedule and links for each game from pfr"""
         year, team = str(year), str(team)
         url = f'https://www.pro-football-reference.com/teams/{team}/{year}.htm'
         ua = UserAgent()
