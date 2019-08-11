@@ -23,11 +23,17 @@ class WinShares:
         standings = self._scrape_standings(year)
         teams = {i: round(j*16, 1) for i, j in standings.set_index('Tm').to_dict()['W-L%'].items()}
         
-        df = pd.DataFrame({})
+        # df = pd.DataFrame({})
+        # for count, tm in enumerate(teams):
+            # print(f'team # {count + 1} of 32', end = '\r')
+            # new = self.calculate_season_wpa(year, tm)
+            # df = pd.concat([df, new], axis = 0, sort = False)
+            
+        l = []
         for count, tm in enumerate(teams):
             print(f'team # {count + 1} of 32', end = '\r')
-            new = self.calculate_season_wpa(year, tm)
-            df = pd.concat([df, new], axis = 0, sort = False)
+            l.append(self.calculate_season_wpa(year, tm))
+        df = pd.concat(l, axis = 0, sort = False)
         
         #adjusts TeamWPA to league average TeamWPA for year
         wpa_avg = {i: j for i, j in df.mean().to_dict().items() if i in ['TeamOffWPA', 'TeamDefWPA', 'TeamSTWPA']}
@@ -36,29 +42,35 @@ class WinShares:
         # df.to_csv('middle.csv')
         # df = pd.read_csv('middle.csv')
         
-        final = pd.DataFrame({})
+        # final = pd.DataFrame({})
+        l = []
         print('Computing WinShares...')
         for count, tm in enumerate(teams):
             # print(f'team {count + 1}', end = '\r')
-            new = pd.DataFrame({})
+            # new = pd.DataFrame({})
             for wk in np.unique(df[df.Team == tm]['Week']):
                 temp = df[(df.Team == tm) & (df.Week == wk) & ((~np.isnan(df.TeamOffWPA)) | (~np.isnan(df.TeamDefWPA)) | (~np.isnan(df.TeamSTWPA)))]
                 for k in ['Off', 'Def', 'ST']:
-                    bottom = temp.sum()[[f'{k}RelImp']][0] if abs(temp.sum()[[f'{k}RelImp']][0]) > 0.01 else .01 * temp.sum()[[f'{k}RelImp']][0]/abs(temp.sum()[[f'{k}RelImp']][0])
-                    X = (temp.mean()[[f'TeamAdj{k}WPA']][0])/bottom
-                    temp[f'{k}WPA'] = temp[[f'{k}RelImp']] * X
+                    # bottom = temp.sum()[[f'{k}RelImp']][0] if abs(temp.sum()[[f'{k}RelImp']][0]) > 0.01 else .01 * temp.sum()[[f'{k}RelImp']][0]/abs(temp.sum()[[f'{k}RelImp']][0])
+                    # X = (temp.mean()[[f'TeamAdj{k}WPA']][0])/bottom
+                    # temp[f'{k}WPA'] = temp[[f'{k}RelImp']] * X
+                    
+                    temp[f'{k}WPA'] = temp[[f'{k}RelImp']] * temp[[f'TeamAdj{k}WPA']].mode().values.item(0)
+                    temp[f'{k}WPA'] = temp[f'{k}WPA'].apply(lambda x: x if x > 0 else 0)
                     
                     temp[f'W{k}'] = (temp[f'{k}WPA'] / abs(temp[f'{k}WPA'].sum())).apply(lambda x: x if x > 0 else 0)
                     
                 temp['TotWPA'] = temp[['OffWPA', 'DefWPA', 'STWPA']].sum(axis = 1)
-                temp['TeamGameWPA'] = [temp['TotWPA'].sum(axis = 0)] * len(temp) if abs(temp['TotWPA'].sum(axis = 0)) > .3 else .3 * (temp['TotWPA'].sum(axis = 0) / abs(temp['TotWPA'].sum(axis = 0)))
+                temp['TeamGameWPA'] = [temp['TotWPA'].sum(axis = 0)] * len(temp)
+                # temp['TeamGameWPA'] = [temp['TotWPA'].sum(axis = 0)] * len(temp) if abs(temp['TotWPA'].sum(axis = 0)) > .3 else .3 * (temp['TotWPA'].sum(axis = 0) / abs(temp['TotWPA'].sum(axis = 0)))
                 temp['OldWinShares'] = (np.unique(temp.WinVal)[0] / abs(np.unique(temp.TeamGameWPA))) * temp[['TotWPA']]
                 temp['NewWinShares'] = np.unique(temp.WinVal)[0] / temp[['WOff', 'WDef', 'WST']].sum(axis = 1).sum(axis = 0) * temp[['WOff', 'WDef', 'WST']].sum(axis = 1)
-                temp.NewWinShares.fillna(0, inplace = True)
                 temp['No0WinShares'] = temp['OldWinShares'].apply(lambda x: x if x > 0 else 0)
-                new = pd.concat([new, temp], axis = 0, sort = False)
-            final = pd.concat([final, new], axis = 0, sort = False)
-            
+                temp.fillna(0, inplace = True)
+                l.append(temp)
+                # new = pd.concat([new, temp], axis = 0, sort = False)
+            # final = pd.concat([final, new], axis = 0, sort = False)
+        final = pd.concat(l, axis = 0, sort = False)    
         if 'Unnamed: 0' in final.columns:
             final.drop('Unnamed: 0', axis = 1, inplace = True)
 
@@ -70,7 +82,8 @@ class WinShares:
         sched = sched[sched.Week.isin([i for i in range(18)])]
         roster = self._scrape_roster(year, team)
         wpa = self._scrape_game_wpa(year, team).reset_index()
-        df = pd.DataFrame({})
+        # df = pd.DataFrame({})
+        l = []
         for wk in sched[['Week']].values:   
             boxscore = sched[sched.Week == wk[0]][['Boxscore']].values[0][0]
             win = sched[sched.Week == wk[0]][['Wins']].values[0][0]
@@ -91,9 +104,10 @@ class WinShares:
                 roster = roster.sort_values(by = 'AV', ascending = False).drop_duplicates(subset = 'Player', keep = 'first')
              
             new = pd.concat([snap_counts.set_index('Player'), roster.rename(columns = {'Pos': 'RosterPos'}).set_index('Player')], axis = 1, sort = False)
-            new = self.calculate_relative_importance(new.reset_index().rename(columns = {'index': 'Player'}))            
-            df = pd.concat([df, new], sort = False, axis = 0)
-        
+            new = self.calculate_relative_importance(new.reset_index().rename(columns = {'index': 'Player'}))   
+            l.append(new)
+            # df = pd.concat([df, new], sort = False, axis = 0)
+        df = pd.concat(l, axis = 0, sort = False)
         df = df[~np.isnan(df.Week)]
         df['Team'] = [team]*len(df)
         return df   
@@ -105,6 +119,7 @@ class WinShares:
         df: data frame of roster with snap counts for each player
         """
         #TODO experiment w rushing/passing splits and find a way to account for K, P, LS positions
+        l = [df]
         for k in ['Off', 'Def', 'ST']:
             temp = df[(df[f'{k}Pct'] != 0.0) & (~np.isnan(df[f'{k}Pct']))]
             bottom = sum([(i * j) / sum(temp['AV']) for i, j in temp[['AV', f'{k}Pct']].values])
@@ -128,7 +143,9 @@ class WinShares:
                 rel = temp[f'{k}RelImp']
                 temp[f'Team{k}WPA'] = [float(wpa)]*len(temp)
                 # temp[f'{k}WPA'] = wpa*np.array(rel)
-            df = pd.concat([df, temp[[f'{k}RelImp', f'Team{k}WPA']]], sort = False, axis = 1)
+            l.append(temp[[f'{k}RelImp', f'Team{k}WPA']])
+        df = pd.concat(l, axis = 1, sort = False)
+            # df = pd.concat([df, temp[[f'{k}RelImp', f'Team{k}WPA']]], sort = False, axis = 1)
         return df
         
     def _scrape_standings(self, year):
