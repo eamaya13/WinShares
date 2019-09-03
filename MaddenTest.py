@@ -12,23 +12,20 @@ class MaddenTest():
         self.year_to_madden = lambda year : str(int(year[-2:])+2)
         self.teams = {'nwe': 'Patriots', 'mia': 'Dolphins', 'buf': 'Bills', 'nyj': 'Jets', 'bal': 'Ravens', 'rav': 'Ravens', 'pit': 'Steelers', 'cle': 'Browns', 'cin': 'Bengals', 'hou': 'Texans', 'htx': 'Texans', 'clt': 'Colts', 'ind': 'Colts','oti': 'Titans', 'ten': 'Titans', 'jax': 'Jaguars', 'kan': 'Chiefs', 'sdg': 'Chargers', 'lac': 'Chargers', 'den': 'Broncos', 'rai': 'Raiders', 'oak': 'Raiders', 'dal': 'Cowboys', 'phi': 'Eagles', 'was': 'Redskins', 'nyg': 'Giants', 'chi': 'Bears', 'min': 'Vikings', 'gnb': 'Packers', 'det': 'Lions', 'nor': 'Saints', 'car': 'Panthers', 'atl': 'Falcons', 'tam': 'Buccaneers', 'ram': 'Rams', 'stl': 'Rams', 'lar': 'Rams', 'sea': 'Seahawks', 'sfo': '49ers', 'crd': 'Cardinals', 'ari': 'Cardinals'}
     
-    def multi_comparison(self, years):
-        df = {}
-        years = [str(year) for year in years]
-        l = []
-        for year in years:
-            print(f'Year: {year}')
-            df = self.comparison(year)
-            df['Year'] = [int(year)]*len(df)
-            l.append(df)
-        return pd.concat(l, axis = 0, sort = False)
+    def comparison(self, years):
+        if type(years) == int or type(years) == str:
+            return self._comp(years)
+        return pd.concat([self._comp(y) for y in years], axis = 0, sort = False)
         
-    def comparison(self, year):
+    def _comp(self, year):
+        year = str(year)
+        print(f'Year: {year}')
         self.df = pd.concat([self.win_shares_roster(year), self.madden_roster(year)[['Overall']]], axis = 1, sort = False).dropna()
-        # print(f'Correlation of AV with Madden Overall: {np.corrcoef(self.df.AV, self.df.Overall)}')
-        
+        self.df['Year'] = [int(year)]*len(self.df)
+        if 'Unnamed: 0' in self.df.columns: self.df.drop('Unnamed: 0', axis = 1, inplace = True)
         for ws in [i for i in self.df.columns if 'WinShares' in i]: 
-            print(f'Correlation of {ws} with Madden all Overalls: {round(np.corrcoef(self.df[ws], self.df.Overall)[0][1], 2)} 85+ Ovr: {round(np.corrcoef(self.df[self.df.Overall >= 85][ws], self.df[self.df.Overall >= 85].Overall)[0][1], 2)} AV: {round(np.corrcoef(self.df[ws], self.df.AV)[0][1], 2)}')
+            print(f'Correlation of {ws} with Madden all Overalls: {round(np.corrcoef(self.df[ws], self.df.Overall)[0][1], 2)} 80+ Ovr: {round(np.corrcoef(self.df[self.df.Overall >= 80][ws], self.df[self.df.Overall >= 80].Overall)[0][1], 2)} AV: {round(np.corrcoef(self.df[ws], self.df.AV)[0][1], 2)}')
+        # print(f'Correlation of AV with Madden all Overalls: {round(np.corrcoef(self.df.AV, self.df.Overall)[0][1], 2)} 80+ Ovr: {round(np.corrcoef(self.df[self.df.Overall >= 80].AV, self.df[self.df.Overall >= 80].Overall)[0][1], 2)}')
         return self.df
     
     def madden_roster(self, year):
@@ -55,11 +52,6 @@ class MaddenTest():
             if len(np.unique(new['Team'])[0].split()) > 1:
                 new['Team'] = [i.split()[-1] for i in new['Team'].values]
             df = pd.concat([df, new], axis = 0, sort = False)
-        # df = pd.DataFrame({})    
-        # new = []
-        # for u in urls:
-            # new.append(pd.read_excel(u))
-        # df = pd.concat([df, new], axis = 0, sort = False)
         if 'Name' not in df.columns:
             if 'LAST' in df.columns and 'FIRST' in df.columns:
                 df['Name'] = [f'{i} {j}' for i, j in df[['FIRST', 'LAST']].values]
@@ -83,7 +75,8 @@ class MaddenTest():
         try:
             df = pd.read_csv(f'data/{year}winshares.csv')
         except FileNotFoundError:
-            df = WinShares().win_shares(year)
+            W = WinShares()
+            df = W.win_shares(year)
             df.to_csv(f'data/{year}winshares.csv')
         df['MaddenTeam'] = [self.teams[tm] for tm in df['Team'].values]
         return df.groupby(['Player', 'MaddenTeam']).sum()

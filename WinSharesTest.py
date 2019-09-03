@@ -16,73 +16,60 @@ class WinShares:
         self.games = None
     
     def win_shares(self, year):
+        """calculate win shares"""
+        if type(year) == int or type(year) == str:
+            return self._ws(str(year))
+        return pd.concat([self._ws(str(y)) for y in year], axis = 0, sort = False)
+    
+    def _ws(self, year):
         """calculates win shares for the given year"""
         pd.options.mode.chained_assignment = None
         warnings.filterwarnings('ignore')
         #create dictionary w team: wins
         standings = self._scrape_standings(year)
-        teams = {i: round(j*16, 1) for i, j in standings.set_index('Tm').to_dict()['W-L%'].items()}
-        
-        # df = pd.DataFrame({})
-        # for count, tm in enumerate(teams):
-            # print(f'team # {count + 1} of 32', end = '\r')
-            # new = self.calculate_season_wpa(year, tm)
-            # df = pd.concat([df, new], axis = 0, sort = False)
-            
+        teams = {i: round(j*16, 1) for i, j in standings.set_index('Tm').to_dict()['W-L%'].items()}            
         l = []
         for count, tm in enumerate(teams):
-            print(f'team # {count + 1} of 32', end = '\r')
+            print(f'{year} {tm} team # {count + 1} of 32', end = '\r')
             l.append(self.calculate_season_wpa(year, tm))
         df = pd.concat(l, axis = 0, sort = False)
         
         #adjusts TeamWPA to league average TeamWPA for year
         wpa_avg = {i: j for i, j in df.mean().to_dict().items() if i in ['TeamOffWPA', 'TeamDefWPA', 'TeamSTWPA']}
         for k in ['Off', 'Def', 'ST']:  df[f'TeamAdj{k}WPA'] = [w - wpa_avg[f'Team{k}WPA'] for w in df[f'Team{k}WPA'].values]
-        
-        # df.to_csv('middle.csv')
-        # df = pd.read_csv('middle.csv')
-        
-        # final = pd.DataFrame({})
+
         l = []
         print('Computing WinShares...')
         for count, tm in enumerate(teams):
-            # print(f'team {count + 1}', end = '\r')
-            # new = pd.DataFrame({})
             for wk in np.unique(df[df.Team == tm]['Week']):
                 temp = df[(df.Team == tm) & (df.Week == wk) & ((~np.isnan(df.TeamOffWPA)) | (~np.isnan(df.TeamDefWPA)) | (~np.isnan(df.TeamSTWPA)))]
                 for k in ['Off', 'Def', 'ST']:
-                    # bottom = temp.sum()[[f'{k}RelImp']][0] if abs(temp.sum()[[f'{k}RelImp']][0]) > 0.01 else .01 * temp.sum()[[f'{k}RelImp']][0]/abs(temp.sum()[[f'{k}RelImp']][0])
-                    # X = (temp.mean()[[f'TeamAdj{k}WPA']][0])/bottom
-                    # temp[f'{k}WPA'] = temp[[f'{k}RelImp']] * X
-                    
                     temp[f'{k}WPA'] = temp[[f'{k}RelImp']] * temp[[f'TeamAdj{k}WPA']].mode().values.item(0)
                     temp[f'{k}WPA'] = temp[f'{k}WPA'].apply(lambda x: x if x > 0 else 0)
                     
-                    temp[f'W{k}'] = (temp[f'{k}WPA'] / abs(temp[f'{k}WPA'].sum())).apply(lambda x: x if x > 0 else 0)
+                    # temp[f'W{k}'] = (temp[f'{k}WPA'] / abs(temp[f'{k}WPA'].sum())).apply(lambda x: x if x > 0 else 0)
                     
                 temp['TotWPA'] = temp[['OffWPA', 'DefWPA', 'STWPA']].sum(axis = 1)
                 temp['TeamGameWPA'] = [temp['TotWPA'].sum(axis = 0)] * len(temp)
-                # temp['TeamGameWPA'] = [temp['TotWPA'].sum(axis = 0)] * len(temp) if abs(temp['TotWPA'].sum(axis = 0)) > .3 else .3 * (temp['TotWPA'].sum(axis = 0) / abs(temp['TotWPA'].sum(axis = 0)))
-                temp['OldWinShares'] = (np.unique(temp.WinVal)[0] / abs(np.unique(temp.TeamGameWPA))) * temp[['TotWPA']]
-                temp['NewWinShares'] = np.unique(temp.WinVal)[0] / temp[['WOff', 'WDef', 'WST']].sum(axis = 1).sum(axis = 0) * temp[['WOff', 'WDef', 'WST']].sum(axis = 1)
-                temp['No0WinShares'] = temp['OldWinShares'].apply(lambda x: x if x > 0 else 0)
+                temp['WinShares'] = (np.unique(temp.WinVal)[0] / abs(np.unique(temp.TeamGameWPA))) * temp[['TotWPA']]
+                # temp['NewWinShares'] = np.unique(temp.WinVal)[0] / temp[['WOff', 'WDef', 'WST']].sum(axis = 1).sum(axis = 0) * temp[['WOff', 'WDef', 'WST']].sum(axis = 1)
                 temp.fillna(0, inplace = True)
                 l.append(temp)
-                # new = pd.concat([new, temp], axis = 0, sort = False)
-            # final = pd.concat([final, new], axis = 0, sort = False)
         final = pd.concat(l, axis = 0, sort = False)    
         if 'Unnamed: 0' in final.columns:
             final.drop('Unnamed: 0', axis = 1, inplace = True)
-
+        final['Year'] = [year]*len(final)
         return final
 
     def calculate_season_wpa(self, year, team):
+        """creates df w roster info, snap count info, and relative importance for each player in year/team"""
         year, team = str(year), str(team)
         sched = self._scrape_schedule(year, team)
         sched = sched[sched.Week.isin([i for i in range(18)])]
         roster = self._scrape_roster(year, team)
-        wpa = self._scrape_game_wpa(year, team).reset_index()
-        # df = pd.DataFrame({})
+        wpa = self._scrape_game_wpa(year, team)
+        if type(wpa) == type(None):
+            return
         l = []
         for wk in sched[['Week']].values:   
             boxscore = sched[sched.Week == wk[0]][['Boxscore']].values[0][0]
@@ -106,7 +93,6 @@ class WinShares:
             new = pd.concat([snap_counts.set_index('Player'), roster.rename(columns = {'Pos': 'RosterPos'}).set_index('Player')], axis = 1, sort = False)
             new = self.calculate_relative_importance(new.reset_index().rename(columns = {'index': 'Player'}))   
             l.append(new)
-            # df = pd.concat([df, new], sort = False, axis = 0)
         df = pd.concat(l, axis = 0, sort = False)
         df = df[~np.isnan(df.Week)]
         df['Team'] = [team]*len(df)
@@ -118,34 +104,23 @@ class WinShares:
         
         df: data frame of roster with snap counts for each player
         """
-        #TODO experiment w rushing/passing splits and find a way to account for K, P, LS positions
         l = [df]
         for k in ['Off', 'Def', 'ST']:
             temp = df[(df[f'{k}Pct'] != 0.0) & (~np.isnan(df[f'{k}Pct']))]
-            bottom = sum([(i * j) / sum(temp['AV']) for i, j in temp[['AV', f'{k}Pct']].values])
-            temp[f'{k}RelImp'] = [(i * j / sum(temp['AV']))/bottom for i, j in temp[['AV', f'{k}Pct']].values]
-            # temp[f'{k}InvRelImp'] = max(temp[f'{k}RelImp']) - temp[f'{k}RelImp']
-            # temp[f'{k}Rank'] = temp[f'{k}RelImp'].rank(ascending = False)
-            # temp[f'{k}InvRank'] = max(temp[f'{k}Rank']) - temp[f'{k}Rank']
+            bottom = sum([(av * pct) / sum(temp['AV']) for av, pct in temp[['AV', f'{k}Pct']].values])
+            temp[f'{k}RelImp'] = [(av * pct) / (sum(temp['AV']) * bottom) for av, pct in temp[['AV', f'{k}Pct']].values]
             if k != 'ST':
+                #offense/defense
                 categories = [i for i in [f'{k}_pass', f'{k}_run', f'{k}_no_play', f'{k}_qb_kneel', f'{k}_qb_spike'] if i in temp.columns]
                 wpa = np.unique(temp[categories].sum(axis = 1))[0]
-                # rel = temp[f'{k}RelImp'] if wpa >= 0 else temp[f'{k}InvRelImp']
-                rel = temp[f'{k}RelImp']
-                # temp[f'{k}WPA']
                 temp[f'Team{k}WPA'] = [float(wpa)]*len(temp)
-                # temp[f'{k}WPA'] = wpa*np.array(rel)
-            else: 
-                #fix this for ST, fg should be kicker and punt should punter all that
+            else:
+                #special teams
                 categories = [i for i in ['Def_extra_point', 'Def_field_goal', 'Def_kickoff', 'Def_punt', 'Off_extra_point', 'Off_field_goal', 'Off_kickoff', 'Off_punt'] if i in temp.columns]
                 wpa = np.unique(temp[categories].sum(axis = 1))[0]
-                # rel = temp[f'{k}RelImp'] if wpa >= 0 else temp[f'{k}InvRelImp']
-                rel = temp[f'{k}RelImp']
                 temp[f'Team{k}WPA'] = [float(wpa)]*len(temp)
-                # temp[f'{k}WPA'] = wpa*np.array(rel)
             l.append(temp[[f'{k}RelImp', f'Team{k}WPA']])
         df = pd.concat(l, axis = 1, sort = False)
-            # df = pd.concat([df, temp[[f'{k}RelImp', f'Team{k}WPA']]], sort = False, axis = 1)
         return df
         
     def _scrape_standings(self, year):
@@ -186,7 +161,6 @@ class WinShares:
         row_data = [[self._floatify(i.get_text()) if i.get_text() != 'boxscore' else i for i in row.findAll(['th', 'td'])] for row in tr]
         df = pd.DataFrame(row_data, columns = col_names)
         df['Boxscore'] = [i.findAll('a')[0].get('href') if type(i) != float else None for i in df['Boxscore'].values]
-        # df['Wins'] = [{'W': 1, 'T': 0.5, 'L': 0, '': None}[i] if i == type(str) else None for i in df['Wins'].values]
         df['Wins'] = [{'W': 1, 'L': 0, 'T': 0.5, '': None}[i] if i in ['W', 'L', 'T'] else None for i in df['Wins'].values]
         return df   
         
@@ -235,7 +209,7 @@ class WinShares:
         
         return snap_counts
         
-    def _scrape_game_wpa(self, year, team):  
+    def _scrape_game_wpa(self, year, team):
         """scrape wpa from nflscrapR for given year and team"""
         year, team = str(year), str(team)
         #load data only if unloaded
@@ -246,14 +220,18 @@ class WinShares:
         team, df = str(team), self.pbp
         team = [i for i in self.teams[team] if i in np.unique(df[['home_team', 'away_team']])][0]
         df = df[(df.home_team == team) | (df.away_team == team)]
-        
-        #creates dataframe with week as index and playclass (Off_run, Def_pass, etc.) as columns. Values are cumulative WPA for week and playclass
-        df[f'{team}_wpa'] = [i if j == team else -i for i, j in df[['wpa', 'posteam']].values]
-        df = pd.concat([df.set_index('game_id'), self.games[(self.games.home_team == team) | (self.games.away_team == team)].set_index('game_id')[['week']]], axis = 1, sort = False).reset_index()
-        df['playclass'] = [f'Off_{j}' if i == team else f'Def_{j}' for i, j in df[['posteam', 'play_type']].values]
-        df = df.groupby(['week', 'playclass']).sum().reset_index().pivot_table(values = f'{team}_wpa', columns = 'playclass', index = 'week')
-        return df
 
+        #creates dataframe with week as index and playclass (Off_run, Def_pass, etc.) as columns. Values are cumulative WPA for week and playclass
+        try:
+            df[f'{team}_wpa'] = [i if j == team else -i for i, j in df[['wpa', 'posteam']].values]
+            df = pd.concat([df.set_index('game_id'), self.games[(self.games.home_team == team) | (self.games.away_team == team)].set_index('game_id')[['week']]], axis = 1, sort = False).reset_index()
+            df['playclass'] = [f'Off_{j}' if i == team else f'Def_{j}' for i, j in df[['posteam', 'play_type']].values]
+            df = df.groupby(['week', 'playclass']).sum().reset_index().pivot_table(values = f'{team}_wpa', columns = 'playclass', index = 'week').reset_index()
+        except:
+            print(f'Unable to scrape WPA for {year} {team}')
+            return
+        return df
+        
     def _load_win_probability(self, year):
         """loads play-by-play data and game data from nflscrapR"""
         year = str(year)
