@@ -2,6 +2,8 @@
 
 Repository for creating WinShares in the NFL.
 
+Paper in repository describes process and theory for the calculation of WinShares (pdf file).
+
 WinSharesTest.py - Class for scraping data from Pro Football Reference and calculating WinShares for years 2014-2018. 
 
 MaddenTest.py - Class to run correlation tests with WinShares and Madden Overalls for years 2014-2018
